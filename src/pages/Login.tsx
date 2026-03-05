@@ -1,13 +1,18 @@
 import { User } from '../types';
 import { useState, FormEvent, useEffect } from 'react';
 import { Loader2, LogIn } from 'lucide-react';
+// Import Firebase dari file yang sudah kita buat tadi
+import { auth, db } from '../firebase'; 
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface LoginProps {
   onLogin: (user: User) => void;
 }
 
 export default function Login({ onLogin }: LoginProps) {
-  const [loginData, setLoginData] = useState({ username: '', password: '' });
+  // Gunakan email dan password karena Firebase Auth standar menggunakan email
+  const [loginData, setLoginData] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [branding, setBranding] = useState({ 
@@ -16,27 +21,27 @@ export default function Login({ onLogin }: LoginProps) {
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Logo_Mahkamah_Agung_RI.png/600px-Logo_Mahkamah_Agung_RI.png' 
   });
 
+  // Mengambil pengaturan dari Firestore secara otomatis
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const res = await fetch('/api/settings/general');
-        const data = await res.json();
-        setBranding({
-          name: data.appName || 'Pemilihan Agen Perubahan - PA Prabumulih',
-          subtitle: data.appSubtitle || 'Pengadilan Agama Prabumulih',
-          logo: data.appLogoUrl || 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Logo_Mahkamah_Agung_RI.png/600px-Logo_Mahkamah_Agung_RI.png'
-        });
+        const settingsRef = doc(db, 'settings', 'general');
+        const settingsSnap = await getDoc(settingsRef);
+        
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          setBranding({
+            name: data.appName || branding.name,
+            subtitle: data.appSubtitle || branding.subtitle,
+            logo: data.appLogoUrl || branding.logo
+          });
+        }
       } catch (err) {
-        console.error('Failed to fetch settings', err);
+        console.error('Gagal mengambil pengaturan dari Firestore:', err);
       }
     };
     fetchSettings();
   }, []);
-
-  const handleLoginSuccess = (user: User) => {
-    localStorage.setItem('userId', user.id.toString());
-    onLogin(user);
-  };
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -44,22 +49,35 @@ export default function Login({ onLogin }: LoginProps) {
     setError('');
 
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginData)
-      });
+      // Login langsung menggunakan Firebase Auth SDK
+      const userCredential = await signInWithEmailAndPassword(
+        auth, 
+        loginData.email, 
+        loginData.password
+      );
+      
+      const firebaseUser = userCredential.user;
 
-      const data = await res.json();
-
-      if (res.ok) {
-        handleLoginSuccess(data);
+      // Ambil detail profile user dari Firestore
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as User;
+        localStorage.setItem('userId', firebaseUser.uid);
+        onLogin({ ...userData, id: firebaseUser.uid }); // Memastikan ID adalah string UID
       } else {
-        setError(data.error || 'Username atau password salah');
+        setError('Data profil tidak ditemukan di database.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Gagal login, periksa koneksi Anda');
+      // Pesan error lebih spesifik dari Firebase
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError('Email atau password salah');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Format email tidak valid');
+      } else {
+        setError('Gagal login, periksa koneksi Anda');
+      }
     } finally {
       setLoading(false);
     }
@@ -93,14 +111,15 @@ export default function Login({ onLogin }: LoginProps) {
             )}
 
             <div>
-              <label htmlFor="login-username" className="block text-sm font-medium text-slate-700">Username</label>
+              <label htmlFor="login-email" className="block text-sm font-medium text-slate-700">Email</label>
               <input
-                id="login-username"
-                type="text"
+                id="login-email"
+                type="email"
+                placeholder="email@kantor.go.id"
                 required
                 className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
-                value={loginData.username}
-                onChange={e => setLoginData({...loginData, username: e.target.value})}
+                value={loginData.email}
+                onChange={e => setLoginData({...loginData, email: e.target.value})}
               />
             </div>
 
