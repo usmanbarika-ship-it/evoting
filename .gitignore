@@ -1,0 +1,10 @@
+# Variabel lingkungan (Sangat Penting!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Folder dependensi & build
+node_modules/
+dist/
